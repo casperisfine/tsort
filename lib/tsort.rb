@@ -147,9 +147,7 @@ module TSort
   #   p graph.tsort # raises TSort::Cyclic
   #
   def tsort
-    each_node = method(:tsort_each_node)
-    each_child = method(:tsort_each_child)
-    TSort.tsort(each_node, each_child)
+    TSort.tsort(self)
   end
 
   # Returns a topologically sorted array of nodes.
@@ -172,8 +170,8 @@ module TSort
   #   each_child = lambda {|n, &b| g[n].each(&b) }
   #   p TSort.tsort(each_node, each_child) # raises TSort::Cyclic
   #
-  def TSort.tsort(each_node, each_child)
-    TSort.tsort_each(each_node, each_child).to_a
+  def TSort.tsort(sorter)
+    TSort.tsort_each(sorter).to_a
   end
 
   # The iterator version of the #tsort method.
@@ -200,9 +198,7 @@ module TSort
   #   #   1
   #
   def tsort_each(&block) # :yields: node
-    each_node = method(:tsort_each_node)
-    each_child = method(:tsort_each_child)
-    TSort.tsort_each(each_node, each_child, &block)
+    TSort.tsort_each(self, &block)
   end
 
   # The iterator version of the TSort.tsort method.
@@ -220,16 +216,16 @@ module TSort
   #   #   3
   #   #   1
   #
-  def TSort.tsort_each(each_node, each_child) # :yields: node
-    return to_enum(__method__, each_node, each_child) unless block_given?
+  def TSort.tsort_each(sorter) # :yields: node
+    return to_enum(__method__, sorter) unless block_given?
 
-    TSort.each_strongly_connected_component(each_node, each_child) {|component|
+    TSort.each_strongly_connected_component(sorter) do |component|
       if component.size == 1
         yield component.first
       else
         raise Cyclic.new("topological sort failed: #{component.inspect}")
       end
-    }
+    end
   end
 
   # Returns strongly connected components as an array of arrays of nodes.
@@ -252,9 +248,7 @@ module TSort
   #   p graph.strongly_connected_components #=> [[4], [2, 3], [1]]
   #
   def strongly_connected_components
-    each_node = method(:tsort_each_node)
-    each_child = method(:tsort_each_child)
-    TSort.strongly_connected_components(each_node, each_child)
+    TSort.strongly_connected_components(self)
   end
 
   # Returns strongly connected components as an array of arrays of nodes.
@@ -277,8 +271,8 @@ module TSort
   #   p TSort.strongly_connected_components(each_node, each_child)
   #   #=> [[4], [2, 3], [1]]
   #
-  def TSort.strongly_connected_components(each_node, each_child)
-    TSort.each_strongly_connected_component(each_node, each_child).to_a
+  def TSort.strongly_connected_components(sorter)
+    TSort.each_strongly_connected_component(sorter).to_a
   end
 
   # The iterator version of the #strongly_connected_components method.
@@ -311,9 +305,7 @@ module TSort
   #   #   [1]
   #
   def each_strongly_connected_component(&block) # :yields: nodes
-    each_node = method(:tsort_each_node)
-    each_child = method(:tsort_each_child)
-    TSort.each_strongly_connected_component(each_node, each_child, &block)
+    TSort.each_strongly_connected_component(self, &block)
   end
 
   # The iterator version of the TSort.strongly_connected_components method.
@@ -339,18 +331,16 @@ module TSort
   #   #   [2, 3]
   #   #   [1]
   #
-  def TSort.each_strongly_connected_component(each_node, each_child) # :yields: nodes
-    return to_enum(__method__, each_node, each_child) unless block_given?
+  def TSort.each_strongly_connected_component(sorter, &block) # :yields: nodes
+    return to_enum(__method__, sorter) unless block_given?
 
     id_map = {}
     stack = []
-    each_node.call {|node|
+    sorter.send(:tsort_each_node) do |node|
       unless id_map.include? node
-        TSort.each_strongly_connected_component_from(node, each_child, id_map, stack) {|c|
-          yield c
-        }
+        TSort.each_strongly_connected_component_from(node, sorter, id_map, stack, &block)
       end
-    }
+    end
     nil
   end
 
@@ -381,7 +371,7 @@ module TSort
   #   #   [2, 3]
   #
   def each_strongly_connected_component_from(node, id_map={}, stack=[], &block) # :yields: nodes
-    TSort.each_strongly_connected_component_from(node, method(:tsort_each_child), id_map, stack, &block)
+    TSort.each_strongly_connected_component_from(node, self, id_map, stack, &block)
   end
 
   # Iterates over strongly connected components in a graph.
@@ -405,25 +395,23 @@ module TSort
   #   #   [2, 3]
   #   #   [1]
   #
-  def TSort.each_strongly_connected_component_from(node, each_child, id_map={}, stack=[]) # :yields: nodes
-    return to_enum(__method__, node, each_child, id_map, stack) unless block_given?
+  def TSort.each_strongly_connected_component_from(node, sorter, id_map={}, stack=[], &block) # :yields: nodes
+    return to_enum(__method__, node, sorter, id_map, stack) unless block_given?
 
     minimum_id = node_id = id_map[node] = id_map.size
     stack_length = stack.length
     stack << node
 
-    each_child.call(node) {|child|
+    sorter.send(:tsort_each_child, node) do |child|
       if id_map.include? child
         child_id = id_map[child]
         minimum_id = child_id if child_id && child_id < minimum_id
       else
         sub_minimum_id =
-          TSort.each_strongly_connected_component_from(child, each_child, id_map, stack) {|c|
-            yield c
-          }
+          TSort.each_strongly_connected_component_from(child, sorter, id_map, stack, &block)
         minimum_id = sub_minimum_id if sub_minimum_id < minimum_id
       end
-    }
+    end
 
     if node_id == minimum_id
       component = stack.slice!(stack_length .. -1)
